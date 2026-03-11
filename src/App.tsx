@@ -484,7 +484,14 @@ function App() {
                 } else {
                     const en = showChunks ? (item.chunkedEn || item.original) : item.original;
                     const ja = showChunks ? (item.chunkedJa || item.translation) : item.translation;
-                    return [en, ja, item.tips].filter(Boolean).join('\n');
+                    // 語彙（単語／イディオム）を整形して含める
+                    let vocabText = '';
+                    if (item.vocabulary && item.vocabulary.trim() !== '' && item.vocabulary.trim() !== 'なし') {
+                        vocabText = '【単語／イディオム】\n' + item.vocabulary;
+                    }
+                    // tipsが「なし」の場合は除外
+                    const tipsText = (item.tips && item.tips.trim() !== 'なし') ? item.tips : '';
+                    return [en, ja, vocabText, tipsText].filter(Boolean).join('\n');
                 }
             }).join('\n\n');
         }
@@ -494,13 +501,41 @@ function App() {
         return resultContent;
     }, [activeFunction, deepReadItems, showChunks, wordsMode, wordsFullResult, resultContent]);
 
+    // リッチテキスト（HTML）をクリップボードにコピーするヘルパー
+    const copyRichText = useCallback(async () => {
+        const resultEl = resultRef.current;
+        if (!resultEl) return false;
+
+        const html = resultEl.innerHTML;
+        const plainText = getResultText();
+        if (!plainText) return false;
+
+        try {
+            // HTMLフォーマット付きでコピー（GmailやDocs等に貼り付けた時にデザインが保持される）
+            const wrappedHtml = `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', sans-serif; line-height: 1.7; color: #e0e0e0;">${html}</div>`;
+            const htmlBlob = new Blob([wrappedHtml], { type: 'text/html' });
+            const textBlob = new Blob([plainText], { type: 'text/plain' });
+
+            await navigator.clipboard.write([
+                new ClipboardItem({
+                    'text/html': htmlBlob,
+                    'text/plain': textBlob,
+                })
+            ]);
+            return true;
+        } catch {
+            // フォールバック: プレーンテキストでコピー
+            await navigator.clipboard.writeText(plainText);
+            return true;
+        }
+    }, [getResultText]);
+
     const handleCopy = useCallback(async () => {
-        const text = getResultText();
-        if (!text) return;
-        await navigator.clipboard.writeText(text);
+        const success = await copyRichText();
+        if (!success) return;
         setCopySuccess(true);
         setTimeout(() => setCopySuccess(false), 2000);
-    }, [getResultText]);
+    }, [copyRichText]);
 
     const handleOpenGmail = useCallback(async () => {
         const text = getResultText();
@@ -514,11 +549,11 @@ function App() {
             window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${subject}`, '_blank');
         }
         try {
-            await navigator.clipboard.writeText(text);
+            await copyRichText();
             setCopySuccess(true);
             setTimeout(() => setCopySuccess(false), 2000);
         } catch (_) { /* ignore */ }
-    }, [getResultText]);
+    }, [getResultText, copyRichText]);
 
     const handleNativeShare = useCallback(async () => {
         const text = getResultText();
