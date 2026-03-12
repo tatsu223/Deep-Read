@@ -272,7 +272,10 @@ const DeepSentenceBlock = memo(({ item, showChunks }: {
 // ==========================================
 function App() {
     const [view, setView] = useState<AppView>('main');
-    const [sourceText, setSourceText] = useState('');
+    const [sourceText, setSourceText] = useState(() => {
+        const saved = localStorage.getItem('deepread_source') || '';
+        return (saved.includes('ここに英単語') || saved.includes('ここに解析結果')) ? '' : saved;
+    });
     const [resultContent, setResultContent] = useState('');
     const [deepReadItems, setDeepReadItems] = useState<DeepReadItem[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -869,7 +872,7 @@ function App() {
                     <div className="input-workspace">
                         <textarea
                             className="main-textarea"
-                            placeholder="ここに学習・解析したい英文記事・英文テキストをコピー＆ペーストしてください..."
+                            placeholder=""
                             value={sourceText}
                             onChange={(e) => setSourceText(e.target.value)}
                         />
