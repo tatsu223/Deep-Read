@@ -137,6 +137,42 @@ function renderBQ(lines: string[]): string {
     return `<blockquote class="result-blockquote">${lines.map(t => `<div>${escapeHtml(t)}</div>`).join('')}</blockquote>`;
 }
 
+function buildDeepReadHtmlForCopy(items: DeepReadItem[], showChunks: boolean): string {
+    const parts: string[] = [];
+    for (const item of items) {
+        if (item.type === 'section') {
+            if (item.title) parts.push(`<div style="font-weight:700;color:#222;margin:16px 0 4px;">${escapeHtml(item.title)}</div>`);
+            if (item.para) parts.push(`<div style="color:#555;margin:4px 0 12px;line-height:1.6;">${escapeHtml(item.para)}</div>`);
+        } else {
+            const displayEn = showChunks && item.chunkedEn ? item.chunkedEn : item.original;
+            const rawJa = showChunks ? (item.chunkedJa || item.translation) : item.translation;
+            let transText = rawJa;
+            let vocabLines: string[] = [];
+            if (item.vocabulary && item.vocabulary.trim() !== '' && item.vocabulary.trim() !== 'なし') {
+                vocabLines = item.vocabulary.split('\n').filter(l => l.trim() !== '' && l.trim() !== 'なし');
+            } else {
+                const lines = transText.split('\n').filter(l => l.trim() !== '');
+                vocabLines = lines.filter(l => l.trim().startsWith('・') || l.trim().startsWith('•'));
+                transText = lines.filter(l => !l.trim().startsWith('・') && !l.trim().startsWith('•')).join('\n');
+            }
+            parts.push(`<div style="border-left:3px solid #4a9eff;padding:4px 12px;margin:8px 0;color:#1a3a5c;">${escapeHtml(displayEn)}</div>`);
+            parts.push(`<div style="color:#333;margin:4px 0;">${escapeHtml(transText)}</div>`);
+            if (vocabLines.length > 0) {
+                const vocabItems = vocabLines.map(line => {
+                    const text = line.trim().replace(/^[・•\-*]\s*/, '');
+                    return `<div style="color:#333;padding:2px 0;font-size:0.9em;">・${escapeHtml(text)}</div>`;
+                }).join('');
+                parts.push(`<div style="margin:8px 0;padding:6px 10px;background:#f5f5f5;border-radius:4px;"><div style="font-size:0.75em;font-weight:600;color:#555;margin-bottom:4px;">単語／イディオム</div>${vocabItems}</div>`);
+            }
+            if (item.tips && item.tips.trim() !== '' && item.tips.trim() !== 'なし') {
+                parts.push(`<div style="margin:6px 0;"><div style="font-size:0.75em;font-weight:600;color:#555;margin-bottom:2px;">Tips</div><div style="color:#555;font-size:0.9em;">${escapeHtml(item.tips).replace(/\n/g, '<br>')}</div></div>`);
+            }
+            parts.push('<hr style="border:none;border-top:1px solid #e0e0e0;margin:12px 0;">');
+        }
+    }
+    return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Hiragino Sans',sans-serif;line-height:1.7;color:#333;">${parts.join('')}</div>`;
+}
+
 function shortenWordsResult(longResult: string): string {
     const lines = longResult.split('\n');
     const kept: string[] = [];
@@ -157,41 +193,6 @@ function shortenWordsResult(longResult: string): string {
 // ==========================================
 // Deep Read 表示コンポーネント（memo化で画面揺れ防止）
 // ==========================================
-
-// 日本語訳・語彙をレンダリング（語彙は箇条書きで分離表示）
-// translation フィールド例:
-//   自然な日本語訳。
-//   ・vocabulary：意味
-//   ・vocabulary2：意味
-function renderTranslation(item: DeepSentenceItem, showChunks: boolean): string {
-    let transText = showChunks ? (item.chunkedJa || item.translation) : item.translation;
-    let vocabLines: string[] = [];
-
-    if (item.vocabulary && item.vocabulary !== 'なし') {
-        vocabLines = item.vocabulary.split('\n').filter(l => l.trim() !== '' && l.trim() !== 'なし');
-    } else {
-        const lines = transText.split('\n').filter(l => l.trim() !== '');
-        vocabLines = lines.filter(l => l.trim().startsWith('・') || l.trim().startsWith('•'));
-        transText = lines.filter(l => !l.trim().startsWith('・') && !l.trim().startsWith('•')).join('\n');
-    }
-
-    // チャンクOFFのときは不要な「／」「/」を削除。ONの時はスタイルを適用。
-    let formattedTrans = escapeHtml(transText);
-    if (showChunks) {
-        formattedTrans = formattedTrans.replace(/[／/]/g, '<span class="chunk-slash">／</span>');
-    } else {
-        formattedTrans = formattedTrans.replace(/[／/]/g, '');
-    }
-
-    let html = `<div class="dr-trans-text">${formattedTrans}</div>`;
-
-    // チャンクON/OFFに関わらず語彙を表示する（ユーザー要望）
-    if (vocabLines.length > 0) {
-        html += `<div class="dr-label">単語／イディオム</div>`;
-        html += vocabLines.map(line => `<div class="dr-vocab-item">${escapeHtml(line.trim().replace(/^[・•\-*]\s*/, ''))}</div>`).join('');
-    }
-    return html;
-}
 
 // 段落ブロック（チャンクボタン非対象・枠囲み）
 const DeepSectionBlock = memo(({ item }: { item: DeepSectionItem }) => (
@@ -468,6 +469,7 @@ function App() {
             activeRequestIdRef.current = 0;
             setView('main');
             setIsLoading(false);
+            setSourceText('');
         };
         window.addEventListener('popstate', handlePopState);
         return () => { window.removeEventListener('popstate', handlePopState); };
@@ -483,15 +485,24 @@ function App() {
                     return [item.title, item.para].filter(Boolean).join('\n');
                 } else {
                     const en = showChunks ? (item.chunkedEn || item.original) : item.original;
-                    const ja = showChunks ? (item.chunkedJa || item.translation) : item.translation;
-                    // 語彙（単語／イディオム）を整形して含める
+                    const rawJa = showChunks ? (item.chunkedJa || item.translation) : item.translation;
+                    // 表示側（DeepSentenceBlock）と同じロジックで語彙を抽出
+                    let transText = rawJa;
                     let vocabText = '';
                     if (item.vocabulary && item.vocabulary.trim() !== '' && item.vocabulary.trim() !== 'なし') {
                         vocabText = '【単語／イディオム】\n' + item.vocabulary;
+                    } else {
+                        // vocabularyが空のとき、翻訳文から・行を語彙として抽出（表示と同じ処理）
+                        const lines = transText.split('\n').filter(l => l.trim() !== '');
+                        const vocabLines = lines.filter(l => l.trim().startsWith('・') || l.trim().startsWith('•'));
+                        if (vocabLines.length > 0) {
+                            vocabText = '【単語／イディオム】\n' + vocabLines.join('\n');
+                            transText = lines.filter(l => !l.trim().startsWith('・') && !l.trim().startsWith('•')).join('\n');
+                        }
                     }
                     // tipsが「なし」の場合は除外
                     const tipsText = (item.tips && item.tips.trim() !== 'なし') ? item.tips : '';
-                    return [en, ja, vocabText, tipsText].filter(Boolean).join('\n');
+                    return [en, transText, vocabText, tipsText].filter(Boolean).join('\n');
                 }
             }).join('\n\n');
         }
@@ -501,41 +512,43 @@ function App() {
         return resultContent;
     }, [activeFunction, deepReadItems, showChunks, wordsMode, wordsFullResult, resultContent]);
 
-    // リッチテキスト（HTML）をクリップボードにコピーするヘルパー
     const copyRichText = useCallback(async () => {
-        const resultEl = resultRef.current;
-        if (!resultEl) return false;
-
-        const html = resultEl.innerHTML;
         const plainText = getResultText();
         if (!plainText) return false;
-
+        let htmlContent: string;
+        if (activeFunction === 'tutor') {
+            htmlContent = buildDeepReadHtmlForCopy(deepReadItems, showChunks);
+        } else {
+            const resultEl = resultRef.current;
+            if (!resultEl) return false;
+            const html = resultEl.innerHTML;
+            const normalizedHtml = html
+                .replace(/<blockquote[^>]*>/g, '<div style="margin:0;padding:0;border:none;">')
+                .replace(/<\/blockquote>/g, '</div>');
+            htmlContent = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Hiragino Sans',sans-serif;line-height:1.7;">${normalizedHtml}</div>`;
+        }
         try {
-            // HTMLフォーマット付きでコピー（GmailやDocs等に貼り付けた時にデザインが保持される）
-            const wrappedHtml = `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', sans-serif; line-height: 1.7; color: #e0e0e0;">${html}</div>`;
-            const htmlBlob = new Blob([wrappedHtml], { type: 'text/html' });
+            const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
             const textBlob = new Blob([plainText], { type: 'text/plain' });
-
             await navigator.clipboard.write([
-                new ClipboardItem({
-                    'text/html': htmlBlob,
-                    'text/plain': textBlob,
-                })
+                new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })
             ]);
             return true;
         } catch {
-            // フォールバック: プレーンテキストでコピー
             await navigator.clipboard.writeText(plainText);
             return true;
         }
-    }, [getResultText]);
+    }, [activeFunction, deepReadItems, showChunks, getResultText]);
 
-    const handleCopy = useCallback(async () => {
-        const success = await copyRichText();
-        if (!success) return;
-        setCopySuccess(true);
-        setTimeout(() => setCopySuccess(false), 2000);
-    }, [copyRichText]);
+    const handleMemo = useCallback(async () => {
+        const text = getResultText();
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopySuccess(true);
+            setTimeout(() => setCopySuccess(false), 2000);
+        } catch { /* ignore */ }
+    }, [getResultText]);
 
     const handleOpenGmail = useCallback(async () => {
         const text = getResultText();
@@ -543,21 +556,22 @@ function App() {
         const to = localStorage.getItem('deepread_share_email') || '';
         const subject = encodeURIComponent('Deep Read 解析結果');
         const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        if (isMobile) {
-            window.location.href = `mailto:${to}?subject=${subject}`;
-        } else {
-            window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${subject}`, '_blank');
-        }
         try {
             await copyRichText();
             setCopySuccess(true);
             setTimeout(() => setCopySuccess(false), 2000);
         } catch (_) { /* ignore */ }
+        if (isMobile) {
+            window.location.href = `mailto:${to}?subject=${subject}`;
+        } else {
+            window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${subject}`, '_blank');
+        }
     }, [getResultText, copyRichText]);
 
     const handleNativeShare = useCallback(async () => {
         const text = getResultText();
         if (!text || !navigator.share) return;
+        try { await navigator.clipboard.writeText(text); } catch { /* ignore */ }
         try { await navigator.share({ title: 'Deep Read 解析結果', text }); } catch (_) { /* cancel */ }
     }, [getResultText]);
 
@@ -570,7 +584,7 @@ function App() {
 
     const functionLabel: Record<FunctionType, string> = {
         words: 'English Words',
-        tutor: 'English Chunking',
+        tutor: 'Deep Read',
     };
 
     const CEFR_OPTIONS = [
@@ -666,13 +680,14 @@ function App() {
                             activeRequestIdRef.current = 0; // 実行中のストリームを中断
                             setView('main');
                             setIsLoading(false);
+                            setSourceText('');
                         }}>
                             <ArrowLeft size={18} />
                         </button>
                         <div className="logo-icon small"><BookMarked size={16} /></div>
                         <h1>{functionLabel[activeFunction]}</h1>
                         {isLoading && (
-                            <div className="loading-display mini">
+                            <div className="loading-display mini" style={{ marginLeft: '12px' }}>
                                 <div className="spinner small" />
                                 <span>解析中...</span>
                             </div>
@@ -701,11 +716,11 @@ function App() {
                             {isDone && !errorMessage && (
                                 <button
                                     className={`mode-toggle-btn ${copySuccess ? 'active' : ''}`}
-                                    onClick={handleCopy}
-                                    title="結果をコピー"
+                                    onClick={handleMemo}
+                                    title="テキストをメモにコピー"
                                 >
                                     {copySuccess ? <Check size={14} /> : <Copy size={14} />}
-                                    <span>{copySuccess ? 'コピー済' : 'コピー'}</span>
+                                    <span>{copySuccess ? 'コピー済' : 'メモ'}</span>
                                 </button>
                             )}
                         </div>
@@ -877,7 +892,7 @@ function App() {
                                 disabled={!sourceText.trim() || isLoading}
                             >
                                 <BookOpen size={20} />
-                                <span>English Tutor<br /><small>Reading &amp; Writing 解析</small></span>
+                                <span>Deep Read<br /><small>Reading &amp; Writing 解析</small></span>
                             </button>
                         </div>
                     </div>
