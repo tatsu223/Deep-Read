@@ -95,6 +95,7 @@ function applyInline(html: string): string {
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
     html = html.replace(/`(.+?)`/g, '<code class="inline-code">$1</code>');
+    html = html.replace(/[／/]/g, '<span class="chunk-slash">／</span>');
     return html;
 }
 
@@ -104,11 +105,11 @@ function formatMarkdown(text: string): string {
     const parts: string[] = [];
     let inBlockquote = false;
     let blockquoteLines: string[] = [];
+    let inWordBlock = false;
 
     for (const line of lines) {
         if (line.trim() === '---' || line.trim() === '***') {
             if (inBlockquote) { parts.push(renderBQ(blockquoteLines)); blockquoteLines = []; inBlockquote = false; }
-            parts.push('<hr class="result-hr">');
             continue;
         }
         if (line.startsWith('> ')) { inBlockquote = true; blockquoteLines.push(line.slice(2)); continue; }
@@ -120,7 +121,13 @@ function formatMarkdown(text: string): string {
         }
         const sectionMatch = line.match(/^【(.+?)】$/);
         if (sectionMatch) { parts.push(`<div class="section-header">${escapeHtml(sectionMatch[1])}</div>`); continue; }
-        if (line.startsWith('## ')) { parts.push(`<h2 class="result-h2">${applyInline(escapeHtml(line.slice(3)))}</h2>`); continue; }
+        if (line.startsWith('## ')) {
+            if (inWordBlock) parts.push('</div>');
+            parts.push('<div class="word-block">');
+            inWordBlock = true;
+            parts.push(`<h2 class="result-h2">${applyInline(escapeHtml(line.slice(3)))}</h2>`);
+            continue;
+        }
         if (line.match(/^- /)) { parts.push(`<div class="bullet-item"><span class="bullet-dot">•</span><span>${applyInline(escapeHtml(line.slice(2)))}</span></div>`); continue; }
         if (line.startsWith('・')) { parts.push(`<div class="bullet-item"><span class="bullet-dot">•</span><span>${applyInline(escapeHtml(line.slice(1)))}</span></div>`); continue; }
         if (line.startsWith('▶')) { parts.push(`<div class="usage-example"><span class="usage-mark">▶</span><span>${applyInline(escapeHtml(line.slice(1).trim()))}</span></div>`); continue; }
@@ -130,6 +137,7 @@ function formatMarkdown(text: string): string {
         parts.push(`<div class="text-line">${applyInline(escapeHtml(line))}</div>`);
     }
     if (inBlockquote && blockquoteLines.length > 0) parts.push(renderBQ(blockquoteLines));
+    if (inWordBlock) parts.push('</div>');
     return parts.join('');
 }
 
@@ -357,8 +365,15 @@ function App() {
     // ==========================================
     // API呼び出し
     // ==========================================
+    const MAX_INPUT_LENGTH = 30000;
+
     const handleExecute = async (type: FunctionType) => {
         if (!sourceText.trim()) return;
+        if (sourceText.length > MAX_INPUT_LENGTH) {
+            setErrorMessage(`テキストが長すぎます（最大 ${MAX_INPUT_LENGTH.toLocaleString()} 文字）。短くしてから再試行してください。`);
+            setView('result');
+            return;
+        }
         const storedKey = localStorage.getItem('deepread_apikey');
         if (!storedKey) { setView('settings'); return; }
 
@@ -445,6 +460,10 @@ function App() {
     const handleSaveSettings = () => {
         if (!apiKey.trim()) {
             setSettingsStatus({ type: 'error', text: 'APIキーを入力してください' });
+            return;
+        }
+        if (!apiKey.trim().startsWith('AIza') || apiKey.trim().length < 20) {
+            setSettingsStatus({ type: 'error', text: 'APIキーの形式が正しくありません（AIza... で始まる文字列を入力してください）' });
             return;
         }
         localStorage.setItem('deepread_apikey', apiKey.trim());
@@ -583,8 +602,8 @@ function App() {
     const displayModel = MODEL_DISPLAY_NAMES[model] || model;
 
     const functionLabel: Record<FunctionType, string> = {
-        words: 'English Words',
-        tutor: 'Deep Read',
+        words: 'Words',
+        tutor: 'Quick Read',
     };
 
     const CEFR_OPTIONS = [
@@ -668,9 +687,7 @@ function App() {
     // 結果画面
     // ==========================================
     if (view === 'result' && activeFunction) {
-        const displayContent = activeFunction === 'words' && wordsMode === 'short' && wordsFullResult
-            ? shortenWordsResult(wordsFullResult)
-            : resultContent;
+        const displayContent = resultContent;
 
         return (
             <div className="deepread-container">
@@ -685,7 +702,7 @@ function App() {
                             <ArrowLeft size={18} />
                         </button>
                         <div className="logo-icon small"><BookMarked size={16} /></div>
-                        <h1>{functionLabel[activeFunction]}</h1>
+                        <h1>Quick Read</h1>
                         {isLoading && (
                             <div className="loading-display mini" style={{ marginLeft: '12px' }}>
                                 <div className="spinner small" />
@@ -775,7 +792,7 @@ function App() {
 
                 <footer className="deepread-footer">
                     <span className="footer-glow">
-                        DEEP READ • {functionLabel[activeFunction].toUpperCase()} • {displayModel}
+                        QUICK READ • {functionLabel[activeFunction].toUpperCase()} • {displayModel}
                         {activeFunction === 'tutor' ? ` • CEFR ${cefrLevel}` : ''}
                     </span>
                 </footer>
@@ -884,7 +901,7 @@ function App() {
                                 disabled={!sourceText.trim() || isLoading}
                             >
                                 <Search size={20} />
-                                <span>English Words<br /><small>単語と熟語の解説</small></span>
+                                <span>Words<br /><small>単語と熟語の解説</small></span>
                             </button>
                             <button
                                 className="action-btn tutor-btn"
@@ -892,7 +909,7 @@ function App() {
                                 disabled={!sourceText.trim() || isLoading}
                             >
                                 <BookOpen size={20} />
-                                <span>Deep Read<br /><small>Reading &amp; Writing 解析</small></span>
+                                <span>Quick Read<br /><small>Reading &amp; Writing 解析</small></span>
                             </button>
                         </div>
                     </div>
@@ -904,7 +921,7 @@ function App() {
             </main>
 
             <footer className="deepread-footer">
-                <span className="footer-glow">DEEP READ • ENGLISH READING & WRITING COACH</span>
+                <span className="footer-glow">QUICK READ • ENGLISH READING & WRITING COACH</span>
             </footer>
         </div>
     );

@@ -676,15 +676,34 @@ body {
 
 .section-header {
   display: inline-block;
-  padding: 3px 12px;
-  background: rgba(15, 118, 110, 0.07);
-  border-left: 3px solid var(--accent-teal);
-  border-radius: 0 8px 8px 0;
-  font-size: 0.78rem;
+  padding: 2px 8px;
+  background: rgba(15, 118, 110, 0.08);
+  border: 1px solid rgba(15, 118, 110, 0.2);
+  border-radius: 4px;
+  font-size: 0.72rem;
   font-weight: 700;
   color: var(--accent-teal);
-  margin: 10px 0 5px;
-  letter-spacing: 0.04em;
+  margin: 10px 0 4px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.word-block {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.word-block .result-h2 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--accent-teal);
+  margin: 0 0 10px 0;
+  padding-bottom: 8px;
+  border-bottom: 2px solid rgba(15, 118, 110, 0.12);
 }
 
 .bullet-item {
